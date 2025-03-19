@@ -1,0 +1,69 @@
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+
+public class DopplerEffectPostProcessing : MonoBehaviour
+{
+    public Volume frontVolume; // Volume for blue shift (-X direction)
+    public Volume backVolume;  // Volume for red shift (+X direction)
+    public float velocity = 0.8f; // Speed as a fraction of light speed (v/c)
+    public float blendSpeed = 5f; // Controls how smoothly the transition happens
+
+    private ColorAdjustments frontColorAdjustments;
+    private ColorAdjustments backColorAdjustments;
+    private Transform cameraTransform;
+
+    void Start()
+    {
+        cameraTransform = Camera.main.transform; // Get the main camera transform
+
+        // Get Color Adjustments from Volume
+        if (frontVolume.profile.TryGet(out frontColorAdjustments) &&
+            backVolume.profile.TryGet(out backColorAdjustments))
+        {
+            Debug.Log("Color Adjustments found in both Volumes");
+        }
+        else
+        {
+            Debug.LogError("Missing Color Adjustments in Volume Profiles!");
+        }
+    }
+
+    void Update()
+    {
+        if (frontColorAdjustments == null || backColorAdjustments == null) return;
+
+        // Get the camera's forward direction (only X and Z components)
+        Vector3 flatForward = new Vector3(cameraTransform.forward.x, 0, cameraTransform.forward.z).normalized;
+
+        // Reference X-axis directions
+        Vector3 xAxis = Vector3.right;  // +X direction (Red shift)
+        Vector3 negXAxis = Vector3.left; // -X direction (Blue shift)
+
+        // Compute the angle (cosθ) between the camera's view direction and the X-axis
+        float cosThetaRight = Vector3.Dot(flatForward, xAxis);   // Facing +X
+        float cosThetaLeft = Vector3.Dot(flatForward, negXAxis); // Facing -X
+
+        // Compute Doppler shift factors
+        float dopplerRight = Mathf.Sqrt((1 + velocity * cosThetaRight) / (1 - velocity * cosThetaRight));
+        float dopplerLeft = Mathf.Sqrt((1 + velocity * cosThetaLeft) / (1 - velocity * cosThetaLeft));
+
+        // Smooth Doppler blending factor based on cosTheta
+        float blendFactor = Mathf.Clamp01((cosThetaRight + 1f) / 2f); // Normalize from -1 to 1 → 0 to 1
+        blendFactor = Mathf.Lerp(frontVolume.weight, blendFactor, Time.deltaTime * blendSpeed); // Smooth transition
+
+        // Apply volume weight gradually
+        frontVolume.weight = 1f - blendFactor; // More blue when facing -X
+        backVolume.weight = blendFactor; // More red when facing +X
+
+        // Smooth color transitions
+        Color targetFrontColor = new Color(1 / dopplerLeft, 1, dopplerLeft);
+        Color targetBackColor = new Color(1 / dopplerRight, 1, dopplerRight);
+
+        frontColorAdjustments.colorFilter.value = Color.Lerp(frontColorAdjustments.colorFilter.value, targetFrontColor, Time.deltaTime * blendSpeed);
+        backColorAdjustments.colorFilter.value = Color.Lerp(backColorAdjustments.colorFilter.value, targetBackColor, Time.deltaTime * blendSpeed);
+
+        // Debugging output
+        Debug.Log($"Blend Factor: {blendFactor}, Front Color (-X Blue Shift): {frontColorAdjustments.colorFilter.value}, Back Color (+X Red Shift): {backColorAdjustments.colorFilter.value}");
+    }
+}
